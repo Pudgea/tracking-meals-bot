@@ -35,9 +35,18 @@ class NutritionData:
 
 
 class GeminiClient:
-    def __init__(self, api_key: str) -> None:
+    def __init__(self, api_key: str, model: str) -> None:
         genai.configure(api_key=api_key)
-        self._model = genai.GenerativeModel("gemini-1.5-flash")
+        self._model = genai.GenerativeModel(self._normalize_model_name(model))
+
+    @staticmethod
+    def _normalize_model_name(model: str) -> str:
+        m = model.strip()
+        if not m:
+            return "gemini-flash-latest"
+        if m.startswith("models/"):
+            return m
+        return m
 
     async def analyze_meal(
         self,

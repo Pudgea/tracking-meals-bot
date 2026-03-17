@@ -1,6 +1,11 @@
 services:
   bot:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: diet-bot:${IMAGE_TAG:-latest}
+    platform: linux/amd64
+    container_name: diet-bot
     env_file:
       - path: .env
         required: false
@@ -8,6 +13,7 @@ services:
       BOT_TOKEN: ${BOT_TOKEN}
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       DATABASE_URL: ${DATABASE_URL:-postgresql://dietbot:${POSTGRES_PASSWORD}@db:5432/dietbot}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-flash-latest}
     depends_on:
       db:
         condition: service_healthy

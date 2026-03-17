@@ -22,7 +22,7 @@ async def main() -> None:
     pool = await create_pool(config.database_url)
     await run_migrations(pool)
 
-    gemini = GeminiClient(config.gemini_api_key)
+    gemini = GeminiClient(config.gemini_api_key, config.gemini_model)
 
     bot = Bot(
         token=config.bot_token,

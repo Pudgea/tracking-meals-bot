@@ -10,6 +10,7 @@ load_dotenv()
 class Config:
     bot_token: str
     gemini_api_key: str
+    gemini_model: str
     database_url: str
 
 
@@ -17,5 +18,6 @@ def load_config() -> Config:
     return Config(
         bot_token=os.environ["BOT_TOKEN"],
         gemini_api_key=os.environ["GEMINI_API_KEY"],
+        gemini_model=os.environ.get("GEMINI_MODEL", "gemini-flash-latest"),
         database_url=os.environ["DATABASE_URL"],
     )
