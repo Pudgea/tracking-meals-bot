@@ -9,6 +9,7 @@ from src.config import load_config
 from src.db.connection import create_pool
 from src.db.migrations import run_migrations
 from src.handlers.analyze import router as analyze_router
+from src.handlers.ask import router as ask_router
 from src.handlers.count import router as count_router
 from src.handlers.profile import router as profile_router
 from src.handlers.summary import router as summary_router
@@ -36,6 +37,7 @@ async def main() -> None:
     dp.include_router(count_router)
     dp.include_router(summary_router)
     dp.include_router(analyze_router)
+    dp.include_router(ask_router)
     dp.include_router(profile_router)
     dp.include_router(workout_router)
     dp.include_router(weight_router)

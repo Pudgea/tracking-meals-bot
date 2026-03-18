@@ -8,7 +8,6 @@ from aiogram.types import Message
 from src.db.connection import get_pool
 from src.db.queries import (
     get_daily_meals,
-    get_daily_summary,
     get_daily_workouts,
     get_profile,
     get_weight_for_date,
@@ -18,24 +17,25 @@ from src.services.gemini import GeminiClient
 router = Router()
 
 
-@router.message(Command("analyze"))
-async def handle_analyze(message: Message, gemini: GeminiClient) -> None:
+@router.message(Command("ask"))
+async def handle_ask(message: Message, gemini: GeminiClient) -> None:
     user = message.from_user
     if not user:
         return
 
-    pool = get_pool()
-    today = date.today()
-
-    summary_row = await get_daily_summary(
-        pool, user_id=user.id, chat_id=message.chat.id, day=today
-    )
-    if not summary_row or not summary_row["meals"]:
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) < 2:
         await message.reply(
-            "Сегодня нет записей о питании. "
-            "Сначала добавьте приёмы пищи через /count, затем вызовите /analyze."
+            "Задайте вопрос о питании:\n\n"
+            "/ask что мне лучше сейчас съесть?\n"
+            "/ask если съем банан и 200г куриной грудки, сколько это калорий?\n"
+            "/ask хватает ли мне белка за сегодня?"
         )
         return
+
+    question = parts[1]
+    pool = get_pool()
+    today = date.today()
 
     profile_row = await get_profile(pool, user_id=user.id, chat_id=message.chat.id)
     profile = {}
@@ -67,28 +67,18 @@ async def handle_analyze(message: Message, gemini: GeminiClient) -> None:
     )
     workouts_today = [r["description"] for r in workouts_rows]
 
-    summary = {
-        "meals": summary_row["meals"],
-        "calories": summary_row["calories"],
-        "protein": summary_row["protein"],
-        "fat": summary_row["fat"],
-        "carbs": summary_row["carbs"],
-        "fiber": summary_row["fiber"],
-    }
-
-    status = await message.reply("Анализирую день...")
+    status = await message.reply("Думаю...")
 
     try:
-        analysis = await gemini.get_day_analysis(
+        answer = await gemini.ask_question(
             profile=profile,
-            summary=summary,
             meals_today=meals_today,
-            workouts_today=workouts_today,
             weight_kg=weight_kg,
-            date_str=today.strftime("%d.%m.%Y"),
+            workouts_today=workouts_today,
+            question=question,
         )
     except Exception as exc:
         await status.edit_text(f"Ошибка: {exc}")
         return
 
-    await status.edit_text(f"📊 <b>Анализ дня</b>\n\n{html.escape(analysis)}", parse_mode="HTML")
+    await status.edit_text(f"💬 {html.escape(answer)}", parse_mode="HTML")

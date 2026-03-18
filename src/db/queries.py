@@ -171,3 +171,89 @@ async def save_workout(
         """,
         user_id, username, chat_id, description,
     )
+
+
+async def get_daily_workouts(
+    pool: Pool,
+    *,
+    user_id: int,
+    chat_id: int,
+    day: date,
+) -> list[Record]:
+    return await pool.fetch(
+        """
+        SELECT description, logged_at
+        FROM workout_logs
+        WHERE user_id = $1 AND chat_id = $2 AND logged_at::date = $3
+        ORDER BY logged_at
+        """,
+        user_id, chat_id, day,
+    )
+
+
+async def save_workout_template(
+    pool: Pool,
+    *,
+    user_id: int,
+    chat_id: int,
+    name: str,
+    description: str,
+) -> None:
+    await pool.execute(
+        """
+        INSERT INTO workout_templates (user_id, chat_id, name, description)
+        VALUES ($1, $2, $3, $4)
+        """,
+        user_id, chat_id, name, description,
+    )
+
+
+async def get_workout_templates(
+    pool: Pool,
+    *,
+    user_id: int,
+    chat_id: int,
+) -> list[Record]:
+    return await pool.fetch(
+        """
+        SELECT id, name, description
+        FROM workout_templates
+        WHERE user_id = $1 AND chat_id = $2
+        ORDER BY created_at
+        """,
+        user_id, chat_id,
+    )
+
+
+async def get_workout_template_by_id(
+    pool: Pool,
+    *,
+    template_id: int,
+    user_id: int,
+    chat_id: int,
+) -> Record | None:
+    return await pool.fetchrow(
+        """
+        SELECT id, name, description
+        FROM workout_templates
+        WHERE id = $1 AND user_id = $2 AND chat_id = $3
+        """,
+        template_id, user_id, chat_id,
+    )
+
+
+async def delete_workout_template(
+    pool: Pool,
+    *,
+    template_id: int,
+    user_id: int,
+    chat_id: int,
+) -> bool:
+    result = await pool.execute(
+        """
+        DELETE FROM workout_templates
+        WHERE id = $1 AND user_id = $2 AND chat_id = $3
+        """,
+        template_id, user_id, chat_id,
+    )
+    return result.endswith("1")

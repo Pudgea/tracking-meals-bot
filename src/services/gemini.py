@@ -12,16 +12,37 @@ Analyze the meal in the photo and/or description below.
 Return ONLY a valid JSON object — no markdown, no extra text:
 
 {
-  "calories": <number>,
-  "protein":  <number in grams>,
-  "fat":      <number in grams>,
-  "carbs":    <number in grams>,
-  "fiber":    <number in grams>,
-  "description": "<short meal description in Russian>"
+  "calories": <total kcal>,
+  "protein":  <total grams>,
+  "fat":      <total grams>,
+  "carbs":    <total grams>,
+  "fiber":    <total grams>,
+  "description": "<meal name in Russian>",
+  "breakdown": [
+    {
+      "name": "<ingredient + approximate weight, e.g. Куриная грудка 200г>",
+      "calories": <kcal>,
+      "protein": <grams>,
+      "fat": <grams>,
+      "carbs": <grams>,
+      "fiber": <grams>
+    }
+  ]
 }
 
+List each distinct ingredient as a separate item in breakdown with its approximate weight.
 Base all estimates on visible portion size and the provided description.
 """
+
+
+@dataclass(frozen=True)
+class NutritionItem:
+    name: str
+    calories: Decimal
+    protein: Decimal
+    fat: Decimal
+    carbs: Decimal
+    fiber: Decimal
 
 
 @dataclass(frozen=True)
@@ -32,21 +53,46 @@ class NutritionData:
     carbs: Decimal
     fiber: Decimal
     description: str
+    breakdown: tuple  # tuple[NutritionItem, ...]
+
+
+def _parse_decimal(value: object) -> Decimal:
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return Decimal("0")
+
+
+def _format_profile(profile: dict) -> str:
+    if not profile or not (profile.get("height_cm") or profile.get("goal")):
+        return "Не указан"
+    parts = []
+    if profile.get("height_cm"):
+        parts.append(f"Рост: {profile['height_cm']} см")
+    if profile.get("goal"):
+        parts.append(f"Цель: {profile['goal']}")
+    return ", ".join(parts)
+
+
+def _format_meals_context(meals: list[dict]) -> str:
+    if not meals:
+        return "Нет записей о приёмах пищи."
+    lines = []
+    for m in meals:
+        t = m.get("logged_at")
+        time_str = t.strftime("%H:%M") if hasattr(t, "strftime") else str(t)
+        lines.append(
+            f"- {time_str}: {m.get('description', '—')} "
+            f"(ккал: {m.get('calories')}, Б: {m.get('protein')}г, "
+            f"Ж: {m.get('fat')}г, У: {m.get('carbs')}г, Кл: {m.get('fiber')}г)"
+        )
+    return "\n".join(lines)
 
 
 class GeminiClient:
     def __init__(self, api_key: str, model: str) -> None:
         genai.configure(api_key=api_key)
-        self._model = genai.GenerativeModel(self._normalize_model_name(model))
-
-    @staticmethod
-    def _normalize_model_name(model: str) -> str:
-        m = model.strip()
-        if not m:
-            return "gemini-flash-latest"
-        if m.startswith("models/"):
-            return m
-        return m
+        self._model = genai.GenerativeModel(model.strip() or "gemini-flash-latest")
 
     async def analyze_meal(
         self,
@@ -80,13 +126,27 @@ class GeminiClient:
 
         data = json.loads(raw)
 
+        breakdown = tuple(
+            NutritionItem(
+                name=str(item.get("name", "")),
+                calories=_parse_decimal(item.get("calories", 0)),
+                protein=_parse_decimal(item.get("protein", 0)),
+                fat=_parse_decimal(item.get("fat", 0)),
+                carbs=_parse_decimal(item.get("carbs", 0)),
+                fiber=_parse_decimal(item.get("fiber", 0)),
+            )
+            for item in (data.get("breakdown") or [])
+            if isinstance(item, dict)
+        )
+
         return NutritionData(
-            calories=Decimal(str(data["calories"])),
-            protein=Decimal(str(data["protein"])),
-            fat=Decimal(str(data["fat"])),
-            carbs=Decimal(str(data["carbs"])),
-            fiber=Decimal(str(data["fiber"])),
+            calories=_parse_decimal(data["calories"]),
+            protein=_parse_decimal(data["protein"]),
+            fat=_parse_decimal(data["fat"]),
+            carbs=_parse_decimal(data["carbs"]),
+            fiber=_parse_decimal(data["fiber"]),
             description=str(data.get("description", text or "")),
+            breakdown=breakdown,
         )
 
     async def get_workout_advice(
@@ -96,10 +156,7 @@ class GeminiClient:
         workout_description: str,
     ) -> str:
         return await asyncio.to_thread(
-            self._workout_advice_sync,
-            profile,
-            meals_today,
-            workout_description,
+            self._workout_advice_sync, profile, meals_today, workout_description
         )
 
     def _workout_advice_sync(
@@ -108,71 +165,107 @@ class GeminiClient:
         meals_today: list[dict],
         workout_description: str,
     ) -> str:
-        profile_text = "Не указан" if not (profile.get("height_cm") or profile.get("goal")) else (
-            f"Рост: {profile.get('height_cm')} см. Цель: {profile.get('goal') or 'не указана'}"
-        )
-        meals_text = "Нет записей о приёмах пищи за сегодня."
-        if meals_today:
-            lines = []
-            for m in meals_today:
-                t = m.get("logged_at")
-                time_str = t.strftime("%H:%M") if hasattr(t, "strftime") else str(t)
-                lines.append(
-                    f"- {time_str}: {m.get('description', '—')} "
-                    f"(ккал: {m.get('calories')}, Б: {m.get('protein')}, Ж: {m.get('fat')}, У: {m.get('carbs')})"
-                )
-            meals_text = "\n".join(lines)
+        prompt = f"""Профиль: {_format_profile(profile)}
 
-        prompt = f"""Профиль пользователя: {profile_text}
-
-Приёмы пищи за сегодня:
-{meals_text}
+Съедено за сегодня:
+{_format_meals_context(meals_today)}
 
 Тренировка: {workout_description}
 
-Дай краткий совет на русском: что можно съесть или выпить для восстановления после этой тренировки, с учётом уже съеденного за день и цели пользователя. 2–4 предложения, без лишнего."""
+Дай совет на русском: что съесть или выпить для восстановления с учётом уже съеденного и цели.
+Для каждого рекомендуемого продукта укажи граммовку и КБЖУ. 3–5 предложений."""
 
-        response = self._model.generate_content(prompt)
-        return (response.text or "").strip()
+        return (self._model.generate_content(prompt).text or "").strip()
 
     async def get_day_analysis(
         self,
         profile: dict,
         summary: dict,
+        meals_today: list[dict],
+        workouts_today: list[str],
         weight_kg: float | None,
         date_str: str,
     ) -> str:
         return await asyncio.to_thread(
             self._day_analysis_sync,
-            profile,
-            summary,
-            weight_kg,
-            date_str,
+            profile, summary, meals_today, workouts_today, weight_kg, date_str,
         )
 
     def _day_analysis_sync(
         self,
         profile: dict,
         summary: dict,
+        meals_today: list[dict],
+        workouts_today: list[str],
         weight_kg: float | None,
         date_str: str,
     ) -> str:
-        profile_text = "Не указан" if not (profile.get("height_cm") or profile.get("goal")) else (
-            f"Рост: {profile.get('height_cm')} см. Цель: {profile.get('goal') or 'не указана'}"
+        workouts_text = (
+            "\n".join(f"- {w}" for w in workouts_today)
+            if workouts_today else "Нет тренировок."
         )
-        prompt = f"""Профиль: {profile_text}
+
+        prompt = f"""Профиль: {_format_profile(profile)}
 Дата: {date_str}
-Вес на сегодня: {weight_kg if weight_kg is not None else 'не записан'} кг
+Вес: {weight_kg if weight_kg is not None else 'не записан'} кг
 
-Сводка питания за день:
-- Приёмов пищи: {summary.get('meals', 0)}
-- Калории: {summary.get('calories') or 0}
-- Белки: {summary.get('protein') or 0} г
-- Жиры: {summary.get('fat') or 0} г
-- Углеводы: {summary.get('carbs') or 0} г
-- Клетчатка: {summary.get('fiber') or 0} г
+Тренировки за день:
+{workouts_text}
 
-Дай краткий анализ дня на русском: что хорошо, что можно улучшить (питание, режим, баланс БЖУ), конкретные рекомендации. 3–5 предложений."""
+Все приёмы пищи:
+{_format_meals_context(meals_today)}
 
-        response = self._model.generate_content(prompt)
-        return (response.text or "").strip()
+Итого за день: {summary.get('meals', 0)} приёмов, {summary.get('calories') or 0} ккал,
+Б: {summary.get('protein') or 0}г, Ж: {summary.get('fat') or 0}г,
+У: {summary.get('carbs') or 0}г, Кл: {summary.get('fiber') or 0}г
+
+Дай развёрнутый анализ дня на русском: учти тренировки, баланс БЖУ относительно цели,
+качество питания, режим приёмов пищи. Конкретно — что хорошо и что улучшить. 4–6 предложений."""
+
+        return (self._model.generate_content(prompt).text or "").strip()
+
+    async def ask_question(
+        self,
+        profile: dict,
+        meals_today: list[dict],
+        weight_kg: float | None,
+        workouts_today: list[str],
+        question: str,
+    ) -> str:
+        return await asyncio.to_thread(
+            self._ask_question_sync,
+            profile, meals_today, weight_kg, workouts_today, question,
+        )
+
+    def _ask_question_sync(
+        self,
+        profile: dict,
+        meals_today: list[dict],
+        weight_kg: float | None,
+        workouts_today: list[str],
+        question: str,
+    ) -> str:
+        workouts_text = (
+            "\n".join(f"- {w}" for w in workouts_today)
+            if workouts_today else "Нет тренировок."
+        )
+
+        prompt = f"""Контекст пользователя:
+Профиль: {_format_profile(profile)}
+Вес: {weight_kg if weight_kg is not None else 'не записан'} кг
+
+Тренировки сегодня:
+{workouts_text}
+
+Съедено сегодня:
+{_format_meals_context(meals_today)}
+
+Вопрос: {question}
+
+Ответь на русском кратко и по делу. Если речь о конкретных продуктах — обязательно укажи:
+- примерную граммовку (например: банан ~120г, куриная грудка ~200г)
+- КБЖУ для каждого продукта отдельно
+- итоговые КБЖУ если продуктов несколько
+Учитывай, что уже было съедено сегодня, и цель пользователя."""
+
+        return (self._model.generate_content(prompt).text or "").strip()

@@ -1,24 +1,49 @@
+from decimal import Decimal
+
 from aiogram import Bot, Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
 from src.db.connection import get_pool
 from src.db.queries import save_meal
-from src.services.gemini import GeminiClient, NutritionData
+from src.services.gemini import GeminiClient, NutritionData, NutritionItem
 
 router = Router()
 
 
+def _breakdown_line(
+    emoji: str,
+    label: str,
+    total: Decimal,
+    field: str,
+    items: tuple[NutritionItem, ...],
+) -> str:
+    line = f"{emoji} {label}: *{total}* г"
+    contributors = [i for i in items if getattr(i, field) > 0]
+    if len(contributors) > 1:
+        parts = ", ".join(f"{i.name}: {getattr(i, field)}г" for i in contributors)
+        line += f"\n   ↳ {parts}"
+    return line
+
+
 def _format_reply(nutrition: NutritionData, username: str | None) -> str:
     name = f"@{username}" if username else "Неизвестный"
-    return (
-        f"✅ *{name}* — {nutrition.description}\n\n"
-        f"🔥 Калории: *{nutrition.calories}* ккал\n"
-        f"🥩 Белки: *{nutrition.protein}* г\n"
-        f"🧈 Жиры: *{nutrition.fat}* г\n"
-        f"🍞 Углеводы: *{nutrition.carbs}* г\n"
-        f"🌿 Клетчатка: *{nutrition.fiber}* г"
-    )
+    items = nutrition.breakdown
+
+    cal_line = f"🔥 Калории: *{nutrition.calories}* ккал"
+    if len(items) > 1:
+        cal_parts = ", ".join(f"{i.name}: {i.calories}ккал" for i in items if i.calories > 0)
+        cal_line += f"\n   ↳ {cal_parts}"
+
+    lines = [
+        f"✅ *{name}* — {nutrition.description}\n",
+        cal_line,
+        _breakdown_line("🥩", "Белки", nutrition.protein, "protein", items),
+        _breakdown_line("🧈", "Жиры", nutrition.fat, "fat", items),
+        _breakdown_line("🍞", "Углеводы", nutrition.carbs, "carbs", items),
+        _breakdown_line("🌿", "Клетчатка", nutrition.fiber, "fiber", items),
+    ]
+    return "\n".join(lines)
 
 
 @router.message(Command("count"))

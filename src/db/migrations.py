@@ -52,6 +52,17 @@ CREATE TABLE IF NOT EXISTS workout_logs (
 );
 """
 
+_CREATE_WORKOUT_TEMPLATES = """
+CREATE TABLE IF NOT EXISTS workout_templates (
+    id          SERIAL PRIMARY KEY,
+    user_id     BIGINT NOT NULL,
+    chat_id     BIGINT NOT NULL,
+    name        TEXT NOT NULL,
+    description TEXT NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+"""
+
 
 async def run_migrations(pool: asyncpg.Pool) -> None:
     async with pool.acquire() as conn:
@@ -59,3 +70,4 @@ async def run_migrations(pool: asyncpg.Pool) -> None:
         await conn.execute(_CREATE_WEIGHT_LOGS)
         await conn.execute(_CREATE_PROFILES)
         await conn.execute(_CREATE_WORKOUT_LOGS)
+        await conn.execute(_CREATE_WORKOUT_TEMPLATES)
