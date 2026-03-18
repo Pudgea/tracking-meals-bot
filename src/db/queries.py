@@ -90,3 +90,84 @@ async def get_weight_history(
         """,
         user_id, chat_id, limit,
     )
+
+
+async def get_profile(
+    pool: Pool,
+    *,
+    user_id: int,
+    chat_id: int,
+) -> Record | None:
+    return await pool.fetchrow(
+        "SELECT height_cm, goal FROM profiles WHERE user_id = $1 AND chat_id = $2",
+        user_id, chat_id,
+    )
+
+
+async def set_profile(
+    pool: Pool,
+    *,
+    user_id: int,
+    chat_id: int,
+    height_cm: int | None,
+    goal: str | None,
+) -> None:
+    await pool.execute(
+        """
+        INSERT INTO profiles (user_id, chat_id, height_cm, goal)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (user_id, chat_id)
+        DO UPDATE SET height_cm = COALESCE(EXCLUDED.height_cm, profiles.height_cm),
+                      goal = COALESCE(EXCLUDED.goal, profiles.goal),
+                      updated_at = NOW()
+        """,
+        user_id, chat_id, height_cm, goal,
+    )
+
+
+async def get_daily_meals(
+    pool: Pool,
+    *,
+    user_id: int,
+    chat_id: int,
+    day: date,
+) -> list[Record]:
+    return await pool.fetch(
+        """
+        SELECT description, calories, protein, fat, carbs, fiber, logged_at
+        FROM meal_logs
+        WHERE user_id = $1 AND chat_id = $2 AND logged_at::date = $3
+        ORDER BY logged_at
+        """,
+        user_id, chat_id, day,
+    )
+
+
+async def get_weight_for_date(
+    pool: Pool,
+    *,
+    user_id: int,
+    chat_id: int,
+    day: date,
+) -> Record | None:
+    return await pool.fetchrow(
+        "SELECT weight FROM weight_logs WHERE user_id = $1 AND chat_id = $2 AND date = $3",
+        user_id, chat_id, day,
+    )
+
+
+async def save_workout(
+    pool: Pool,
+    *,
+    user_id: int,
+    username: str | None,
+    chat_id: int,
+    description: str,
+) -> None:
+    await pool.execute(
+        """
+        INSERT INTO workout_logs (user_id, username, chat_id, description)
+        VALUES ($1, $2, $3, $4)
+        """,
+        user_id, username, chat_id, description,
+    )
