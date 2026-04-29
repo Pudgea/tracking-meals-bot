@@ -1,3 +1,4 @@
+import html
 from decimal import Decimal
 
 from aiogram import Bot, Router
@@ -18,25 +19,29 @@ def _breakdown_line(
     field: str,
     items: tuple[NutritionItem, ...],
 ) -> str:
-    line = f"{emoji} {label}: *{total}* г"
+    line = f"{emoji} {label}: <b>{total}</b> г"
     contributors = [i for i in items if getattr(i, field) > 0]
     if len(contributors) > 1:
-        parts = ", ".join(f"{i.name}: {getattr(i, field)}г" for i in contributors)
+        parts = ", ".join(
+            f"{html.escape(i.name)}: {getattr(i, field)}г" for i in contributors
+        )
         line += f"\n   ↳ {parts}"
     return line
 
 
 def _format_reply(nutrition: NutritionData, username: str | None) -> str:
-    name = f"@{username}" if username else "Неизвестный"
+    name = f"@{html.escape(username)}" if username else "Неизвестный"
     items = nutrition.breakdown
 
-    cal_line = f"🔥 Калории: *{nutrition.calories}* ккал"
+    cal_line = f"🔥 Калории: <b>{nutrition.calories}</b> ккал"
     if len(items) > 1:
-        cal_parts = ", ".join(f"{i.name}: {i.calories}ккал" for i in items if i.calories > 0)
+        cal_parts = ", ".join(
+            f"{html.escape(i.name)}: {i.calories}ккал" for i in items if i.calories > 0
+        )
         cal_line += f"\n   ↳ {cal_parts}"
 
     lines = [
-        f"✅ *{name}* — {nutrition.description}\n",
+        f"✅ <b>{name}</b> — {html.escape(nutrition.description)}\n",
         cal_line,
         _breakdown_line("🥩", "Белки", nutrition.protein, "protein", items),
         _breakdown_line("🧈", "Жиры", nutrition.fat, "fat", items),
@@ -71,7 +76,10 @@ async def handle_count(message: Message, bot: Bot, gemini: GeminiClient) -> None
     try:
         nutrition = await gemini.analyze_meal(image_bytes, text)
     except Exception as exc:
-        await status.edit_text(f"Ошибка при анализе: {exc}")
+        await status.edit_text(
+            f"Ошибка при анализе: <code>{html.escape(str(exc))}</code>",
+            parse_mode="HTML",
+        )
         return
 
     meal_author = replied.from_user
@@ -95,5 +103,5 @@ async def handle_count(message: Message, bot: Bot, gemini: GeminiClient) -> None
 
     await status.edit_text(
         _format_reply(nutrition, meal_author.username),
-        parse_mode="Markdown",
+        parse_mode="HTML",
     )
